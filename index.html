@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style type="text/css">
+html {
+        height: 100%;
+}
+body  {
+        height: 100%;
+        padding: 0.5cm;
+        margin: 0;
+        background-color: black;
+        color: #0d0;
+}
+
+textarea    {
+        border: none;
+        font-size: 0.6cm;
+        font-family: Georgia, serif;
+        background-color: #202;
+        color: #ffd;
+        height: 100%;
+        width: 100%;
+}
+</style>
+<script type="application/javascript">
+/* this char denotes the start of a command */
+var CMD_CHAR = '\u27e8';
+/* nobble this char code and use it for command char when entered */
+var ENTER_CMD = '`<';
+
+/* syntax highlight > */
+
+var get_close_tag_from_content = function(content) {
+    var old_content = '';
+
+    /* remove all matched tags */
+    /* FIXME: maybe manually iterating would be faster on a large document */
+    while (content != old_content) {
+        old_content = content;
+        /* replaces <x>...</x> where ... contains no open brackets */
+        content = content.replace(/\u27e8([^\u27e9\/]+)\u27e9[^\u27e8]*\u27e8\/\1\u27e9/, '');
+    }
+    /* matches the last <x> in the string (not counting </x>) */
+    var match = /\u27e8([^\u27e9\/]+)\u27e9(?![^\u27e8]*\u27e8[^\u27e9\/])/.exec(content);
+    if (match) {
+        return '/'+match[1]+'\u27e9';
+    } else {
+        return '';
+    }
+};
+
+var get_close_tag = function(textarea) {
+    /* find the last unmatched tag before the cursor position and return a close tag for it */
+    var content = textarea.value.slice(0,textarea.selectionEnd);
+    return get_close_tag_from_content(content);
+};
+
+var close_line_tags = function(textarea) {
+    /* return a set of close tags for markup opened on the line ending at the caret */
+    var content = textarea.value.slice(0,textarea.selectionEnd);
+    if (content.lastIndexOf('\n') > 0) {
+        content = content.slice(content.lastIndexOf('\n'));
+    }
+    var result = '';
+    var new_tag = true;
+    while (new_tag) {
+        new_tag = get_close_tag_from_content(content);
+        if (new_tag) {
+            result += '\u27e8'+new_tag;
+            content += '\u27e8'+new_tag;
+        }
+    }
+    insert_char(textarea, result);
+    return true; /* allow the key through */
+};
+
+/* syntax highlight > */
+
+var insert_char = function(textarea, char, remove_count) {
+    /* will actually insert any string */
+    if (!remove_count) {
+        remove_count = 0;
+    }
+    var spliceIdx = textarea.selectionEnd;
+    textarea.value = textarea.value.slice(0,spliceIdx-remove_count)+char+textarea.value.slice(spliceIdx);
+    textarea.selectionStart = spliceIdx + char.length;
+    textarea.selectionEnd = spliceIdx + char.length;
+    return false;
+}
+
+var char_before_caret_matches = function(textarea, char, offset) {
+    /* will actually match any string */
+    if (!offset) {
+        offset = 0;
+    }
+    if (textarea.selectionEnd) {
+        return textarea.value[textarea.selectionEnd - char.length - offset] == char;
+    } else {
+        return false;
+    }
+};
+
+var is_caret_in_command = function(textarea) {
+    if (char_before_caret_matches(textarea, CMD_CHAR)) {
+        return true;
+    } else if (char_before_caret_matches(textarea, String.fromCharCode(0xd835), 1)) {
+        /* FIXME only match the bold italic ones */
+        return true;
+    } else if (char_before_caret_matches(textarea, CMD_CHAR+'/')) {
+        return true;
+    }
+};
+
+/* syntax highlighting: > */
+
+var handle_char = function(evt) {
+    evt = window.event ? window.event : evt;
+    var new_char_code = evt.charCode; /* not handling non-char keys */
+    var new_key_code = evt.keyCode;
+    var textarea = document.getElementById('editor');
+    if (new_char_code > 96 && new_char_code <= 122 && is_caret_in_command(textarea)) {
+        /* make a 'mathematical bold italic' lowercase letter from regular lowercase */
+        var command_char = String.fromCharCode(0xd835) + String.fromCharCode(new_char_code + 0xdc21);
+        return insert_char(textarea, command_char);
+    } else if (new_char_code > 64 && new_char_code <= 90 && is_caret_in_command(textarea)) {
+        /* make a 'mathematical bold italic' lowercase letter from regular uppercase */
+        var command_char = String.fromCharCode(0xd835) + String.fromCharCode(new_char_code + 0xdc41);
+        return insert_char(textarea, command_char);
+    } else if (new_char_code == 47 && char_before_caret_matches(textarea, CMD_CHAR)) {
+        /* slash as the first character means go close the tag*/
+        return insert_char(textarea, get_close_tag(textarea));
+    } else if (new_char_code > 47 && new_char_code <= 57 && is_caret_in_command(textarea)) {
+        /* make a 'mathematical bold italic' number from regular number */
+        var command_char = String.fromCharCode(0xd835) + String.fromCharCode(new_char_code + 0xdf9e);
+        return insert_char(textarea, command_char);
+    } else if (new_char_code && is_caret_in_command(textarea)) {
+        /* end the command: make a close bracket > */
+        if (char_before_caret_matches(textarea, CMD_CHAR)) {
+            /* remove bracket and replace with entered char */
+            return insert_char(textarea, String.fromCharCode(new_char_code), 1);
+        } else {
+            var new_char = String.fromCharCode(0x27e9);
+            return insert_char(textarea, new_char);
+        }
+    } else if (new_key_code == 13) {
+        if (is_caret_in_command(textarea)) {
+            return false; /* disallow newline within a command */
+        } else {
+            /* markup should not span paragraphs so close tags opened on this line */
+            return close_line_tags(textarea);
+        }
+    } else if (ENTER_CMD.indexOf(String.fromCharCode(new_char_code)) > -1) {
+        return insert_char(textarea, CMD_CHAR);
+    } else {
+        /* do normal textarea editing */
+        return true;
+    }
+};
+
+var init = function() {
+    document.getElementById('editor').onkeypress = handle_char;
+};
+</script>
+</head>
+<body onload="init()">
+<textarea id="editor">hi</textarea>
+</body>
+</html>
+
